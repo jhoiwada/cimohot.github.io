@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#141721"/>
+      <stop offset="100%" stop-color="#0A0C10"/>
+    </linearGradient>
+
+    <!-- Outer Border Glow -->
+    <linearGradient id="borderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF4D2D" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#FF8A00" stop-opacity="0.2"/>
+    </linearGradient>
+
+    <!-- Fiery Flame Main Gradient -->
+    <linearGradient id="fireGrad" x1="0%" y1="100%" x2="50%" y2="0%">
+      <stop offset="0%" stop-color="#E51818"/>
+      <stop offset="45%" stop-color="#FF451A"/>
+      <stop offset="80%" stop-color="#FF8500"/>
+      <stop offset="100%" stop-color="#FFAE00"/>
+    </linearGradient>
+
+    <!-- Inner Core Flame Gradient -->
+    <linearGradient id="coreGrad" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#FF3B14"/>
+      <stop offset="60%" stop-color="#FFA800"/>
+      <stop offset="100%" stop-color="#FFEF66"/>
+    </linearGradient>
+
+    <!-- Dynamic Fire Glow Filter -->
+    <filter id="flameGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="16" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Squircle Base with 112px radius -->
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bgGrad)"/>
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="none" stroke="url(#borderGrad)" stroke-width="4"/>
+
+  <!-- Subtle ambient inner glow ring -->
+  <circle cx="256" cy="270" r="160" fill="#FF451A" opacity="0.08" filter="blur(30px)"/>
+
+  <!-- Group with Flame/Cireng Emblem -->
+  <g transform="translate(0, -6)">
+    <!-- Stylized Modern Spicy Flame (Outer) -->
+    <path d="M 256,70 
+             C 278,135 320,165 352,215 
+             C 388,272 384,335 344,386 
+             C 304,438 226,448 172,408 
+             C 126,374 116,312 142,260 
+             C 148,248 160,236 170,246 
+             C 180,256 172,274 172,286 
+             C 172,326 210,358 252,352 
+             C 288,346 312,314 310,278 
+             C 308,242 278,212 264,180 
+             C 252,152 254,115 256,70 Z" 
+          fill="url(#fireGrad)" 
+          filter="url(#flameGlow)"/>
+
+    <!-- Inner Core Flame (Brilliant Yellow/Amber Spark) -->
+    <path d="M 256,220 
+             C 270,255 292,276 290,305 
+             C 288,328 268,348 244,346 
+             C 220,344 204,324 206,302 
+             C 208,284 218,272 230,260 
+             C 238,252 248,240 256,220 Z" 
+          fill="url(#coreGrad)" opacity="0.95"/>
+
+    <!-- Dynamic Hot Ember Spark Left -->
+    <circle cx="160" cy="180" r="9" fill="#FFAE00" opacity="0.85"/>
+    <!-- Dynamic Hot Ember Spark Right -->
+    <circle cx="348" cy="145" r="7" fill="#FF6B00" opacity="0.8"/>
+  </g>
+</svg>

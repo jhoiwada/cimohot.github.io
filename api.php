@@ -29,7 +29,7 @@ if (empty($action)) {
 
 try {
     // Pengecekan Izin Akses Terpusat
-    $user_actions = ['update_user_profile', 'add_to_cart', 'update_cart', 'remove_from_cart', 'checkout'];
+    $user_actions = ['update_user_profile', 'add_to_cart', 'update_cart', 'remove_from_cart', 'checkout', 'validate_promo'];
     $admin_actions = ['get_dashboard_stats', 'get_all_orders', 'get_all_menus_admin', 'update_order_status'];
 
     if (in_array($action, $user_actions) || in_array($action, $admin_actions)) {
@@ -50,7 +50,7 @@ try {
         // ===================================
         case 'get_menu':
             $category = isset($_GET['category']) ? trim($_GET['category']) : 'all';
-            $sql = $category === 'all' ? "SELECT * FROM menu ORDER BY category, name" : "SELECT * FROM menu WHERE category = ? ORDER BY name";
+            $sql = $category === 'all' ? "SELECT * FROM menu ORDER BY FIELD(category, 'original', 'pedas', 'paket hemat', 'minuman'), name ASC" : "SELECT * FROM menu WHERE category = ? ORDER BY name";
             $stmt = $conn->prepare($sql);
             if ($category !== 'all') { $stmt->bind_param("s", $category); }
             $stmt->execute();
@@ -142,7 +142,10 @@ try {
             }
             break;
 
-
+        case 'logout':
+            session_destroy();
+            sendResponse(true, 'Logout berhasil.');
+            break;
 
         case 'delete_menu':
             if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') { sendResponse(false, 'Akses ditolak.', null, 403); }
@@ -191,8 +194,7 @@ try {
                 }
 
             $stmt = $conn->prepare("INSERT INTO menu (name, description, price, stock, category, image) VALUES (?, ?, ?, ?, ?, ?)");// api.php - baris 209 (Perbaikan)
-            $stmt->bind_param("ssdsiss", $_POST['name'], $_POST['description'], $_POST['price'], $_POST['stock'], $_POST['category'], $image_path_for_db, $menu_id); $stmt->bind_param("ssdiss", $_POST['name'], $_POST['description'], $_POST['price'], $_POST['stock'], $_POST['category'], $image_path_for_db);
-
+            $stmt->bind_param("ssdiss", $_POST['name'], $_POST['description'], $_POST['price'], $_POST['stock'], $_POST['category'], $image_path_for_db);
             if ($stmt->execute()) { sendResponse(true, 'Menu baru berhasil ditambahkan.'); } 
             else { sendResponse(false, 'Gagal menyimpan menu ke database.', null, 500); }
             break;
@@ -459,15 +461,16 @@ try {
      }
      $user_id = (int)$_SESSION['user_id'];
 
-     // PERUBAHAN UTAMA: Membaca dari $_POST
      $items = isset($_POST['items']) ? json_decode($_POST['items'], true) : [];
-     $payment_method = isset($_POST['payment_method']) && in_array($_POST['payment_method'], ['cod', 'transfer']) ? $_POST['payment_method'] : 'cod';
+     $payment_method = isset($_POST['payment_method']) && in_array($_POST['payment_method'], ['cod', 'transfer', 'pickup']) ? $_POST['payment_method'] : 'cod';
+     $delivery_type   = isset($_POST['delivery_type']) && in_array($_POST['delivery_type'], ['delivery','pickup']) ? $_POST['delivery_type'] : 'delivery';
+     $notes           = isset($_POST['notes']) ? trim(htmlspecialchars($_POST['notes'])) : '';
+     $promo_code_input = isset($_POST['promo_code']) ? strtoupper(trim($_POST['promo_code'])) : '';
      
             if (empty($items)) {
                 sendResponse(false, 'Keranjang Anda kosong.', null, 400);
             }
 
-            // data profil pengguna untuk detail pesanan
             $stmt_user = $conn->prepare("SELECT name, phone, address FROM users WHERE user_id = ?");
             $stmt_user->bind_param("i", $user_id);
             $stmt_user->execute();
@@ -475,45 +478,61 @@ try {
             if (!$user_profile) {
                 sendResponse(false, 'Profil pengguna tidak ditemukan.', null, 404);
             }
-            if (empty($user_profile['phone']) || empty($user_profile['address'])) {
+            if ($delivery_type === 'delivery' && (empty($user_profile['phone']) || empty($user_profile['address']))) {
                 sendResponse(false, 'Profil tidak lengkap. Harap isi alamat dan nomor telepon sebelum checkout.', null, 400);
             }
 
             $conn->begin_transaction();
 
             try {
-                // Hitung total harga berdasarkan harga dari database
                 $total_amount = 0;
                 $menu_ids = array_column($items, 'id');
                 $placeholders = str_repeat('?,', count($menu_ids) - 1) . '?';
                 $types = str_repeat('i', count($menu_ids));
-                $stmt_prices = $conn->prepare("SELECT menu_id, price FROM menu WHERE menu_id IN ($placeholders)");
+                $stmt_prices = $conn->prepare("SELECT menu_id, price, name, image FROM menu WHERE menu_id IN ($placeholders)");
                 $stmt_prices->bind_param($types, ...$menu_ids);
                 $stmt_prices->execute();
-                $correct_prices_from_db = array_column($stmt_prices->get_result()->fetch_all(MYSQLI_ASSOC), 'price', 'menu_id');
+                $menu_rows = $stmt_prices->get_result()->fetch_all(MYSQLI_ASSOC);
+                $correct_prices = array_column($menu_rows, null, 'menu_id');
 
                 foreach ($items as &$item) {
-                    $item['price_raw'] = $correct_prices_from_db[$item['id']] ?? 0;
+                    $item['price_raw'] = $correct_prices[$item['id']]['price'] ?? 0;
+                    $item['name']      = $correct_prices[$item['id']]['name'] ?? $item['name'];
                     $total_amount += $item['price_raw'] * $item['quantity'];
                 }
                 unset($item);
 
-                // detail pesanan dari profil pengguna
-                $customer_name = $user_profile['name'];
-                $customer_phone = $user_profile['phone'] ?? '';
-                $delivery_address = $user_profile['address'] ?? '';
+                // Promo code validation & discount
+                $discount_amount = 0;
+                $applied_promo = null;
+                if (!empty($promo_code_input)) {
+                    $stmt_promo = $conn->prepare("SELECT * FROM promotions WHERE code = ? AND is_active = 1 AND (expires_at IS NULL OR expires_at >= NOW())");
+                    $stmt_promo->bind_param("s", $promo_code_input);
+                    $stmt_promo->execute();
+                    $promo = $stmt_promo->get_result()->fetch_assoc();
+                    if ($promo && $total_amount >= (float)$promo['min_order']) {
+                        if ($promo['discount_type'] === 'percentage') {
+                            $discount_amount = (int)round($total_amount * ((float)$promo['discount_value'] / 100));
+                        } else {
+                            $discount_amount = (int)$promo['discount_value'];
+                        }
+                        $discount_amount = min($discount_amount, $total_amount);
+                        $applied_promo = $promo_code_input;
+                    }
+                }
+                $final_amount = $total_amount - $discount_amount;
 
-                // Query INSERT 
-                $stmt_order = $conn->prepare("INSERT INTO orders (user_id, total_amount, status, payment_method, customer_name, customer_phone, delivery_address) VALUES (?, ?, 'pending', ?, ?, ?, ?)");
-                $stmt_order->bind_param("idssss", $user_id, $total_amount, $payment_method, $customer_name, $customer_phone, $delivery_address);
+                $customer_name    = $user_profile['name'];
+                $customer_phone   = $user_profile['phone'] ?? '';
+                $delivery_address = $delivery_type === 'pickup' ? 'PICKUP - Ambil Sendiri' : ($user_profile['address'] ?? '');
+
+                $stmt_order = $conn->prepare("INSERT INTO orders (user_id, total_amount, status, payment_method, customer_name, customer_phone, delivery_address, notes, delivery_type, discount_amount, promo_code) VALUES (?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?)");
+                $stmt_order->bind_param("idssssssis", $user_id, $final_amount, $payment_method, $customer_name, $customer_phone, $delivery_address, $notes, $delivery_type, $discount_amount, $applied_promo);
                 if (!$stmt_order->execute()) { throw new Exception('Gagal membuat pesanan utama.'); }
 
                 $order_id = $conn->insert_id;
-                
-                // Simpan ID pesanan ke session untuk halaman konfirmasi
                 $_SESSION['last_order_id'] = $order_id;
 
-                //  detail item pesanan
                 $stmt_details = $conn->prepare("INSERT INTO order_details (order_id, menu_id, quantity, price, subtotal) VALUES (?, ?, ?, ?, ?)");
                 $stmt_update_stock = $conn->prepare("UPDATE menu SET stock = stock - ? WHERE menu_id = ?");
 
@@ -523,23 +542,70 @@ try {
                     if (!$stmt_details->execute()) { throw new Exception('Gagal menyimpan detail item pesanan.'); }
                     
                     $stmt_update_stock->bind_param("ii", $item['quantity'], $item['id']);
-                    if (!$stmt_update_stock->execute()) { 
-                        throw new Exception('Gagal memperbarui stok menu.'); 
-                    }
+                    if (!$stmt_update_stock->execute()) { throw new Exception('Gagal memperbarui stok menu.'); }
                 }
 
-                // Kosongkan keranjang
                 $stmt_delete = $conn->prepare("DELETE FROM cart WHERE user_id = ?");
                 $stmt_delete->bind_param("i", $user_id);
                 $stmt_delete->execute();
 
                 $conn->commit();
-                sendResponse(true, 'Order berhasil dibuat.');
+                sendResponse(true, 'Order berhasil dibuat.', ['order_id' => $order_id]);
 
             } catch (Exception $e) {
                 $conn->rollback();
-                sendResponse(false, 'Terjadi kesalahan internal pada server: ' . $e->getMessage(), null, 500);
+                sendResponse(false, 'Terjadi kesalahan internal: ' . $e->getMessage(), null, 500);
             }
+            break;
+
+        // Validate promo code (public-facing for logged in users)
+        case 'validate_promo':
+            $code = strtoupper(trim($_POST['code'] ?? $_GET['code'] ?? ''));
+            if (empty($code)) { sendResponse(false, 'Kode promo wajib diisi.', null, 400); }
+            $min_order_check = (float)($_POST['total'] ?? $_GET['total'] ?? 0);
+
+            $stmt = $conn->prepare("SELECT * FROM promotions WHERE code = ? AND is_active = 1 AND (expires_at IS NULL OR expires_at >= NOW())");
+            $stmt->bind_param("s", $code);
+            $stmt->execute();
+            $promo = $stmt->get_result()->fetch_assoc();
+
+            if (!$promo) {
+                sendResponse(false, 'Kode promo tidak valid atau sudah kadaluarsa.', null, 404);
+            }
+            if ($min_order_check > 0 && $min_order_check < (float)$promo['min_order']) {
+                sendResponse(false, 'Minimum order Rp ' . number_format($promo['min_order'],0,',','.') . ' untuk kode ini.', null, 400);
+            }
+            sendResponse(true, 'Promo valid!', [
+                'code'           => $promo['code'],
+                'discount_type'  => $promo['discount_type'],
+                'discount_value' => (float)$promo['discount_value'],
+                'min_order'      => (float)$promo['min_order'],
+                'description'    => $promo['description'],
+            ]);
+            break;
+
+        // Get recent orders for live ticker
+        case 'get_recent_orders':
+            $limit = min((int)($_GET['limit'] ?? 5), 10);
+            $stmt = $conn->prepare(
+                "SELECT o.order_id, o.customer_name, o.order_date,
+                        (SELECT m.name FROM order_details od JOIN menu m ON od.menu_id = m.menu_id WHERE od.order_id = o.order_id ORDER BY od.detail_id ASC LIMIT 1) as first_item,
+                        (SELECT COUNT(*) FROM order_details od2 WHERE od2.order_id = o.order_id) as item_count
+                 FROM orders o
+                 ORDER BY o.order_date DESC LIMIT ?"
+            );
+            $stmt->bind_param("i", $limit);
+            $stmt->execute();
+            $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+            $orders = array_map(function($r) {
+                $firstName = explode(' ', $r['customer_name'])[0];
+                $extra = $r['item_count'] > 1 ? ' + ' . ($r['item_count'] - 1) . ' item lain' : '';
+                return [
+                    'customer_name' => $firstName,
+                    'item_summary'  => ($r['first_item'] ?? 'menu Cimohot') . $extra,
+                ];
+            }, $rows);
+            sendResponse(true, 'OK', ['orders' => $orders]);
             break;
 
         // ===================================

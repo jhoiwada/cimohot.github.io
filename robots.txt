@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /admin-laravel/
+Disallow: /api.php
+Disallow: /akun.php
+Disallow: /logout.php
+Disallow: /scratch/
+
+Sitemap: https://cimohot.test/sitemap.xml

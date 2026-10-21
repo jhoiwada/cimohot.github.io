@@ -1,244 +1,316 @@
 <?php
 session_start();
-// Halaman ini sebaiknya hanya bisa diakses setelah checkout,
-// tapi kita tambahkan pengecekan login untuk keamanan dasar.
-if (!isset($_SESSION['user_id'])) {
-    header('Location: ../login/login.php');
-    exit;
-}
-require_once '../db_connect.php'; 
+if (!isset($_SESSION["user_id"])) { header("Location: ../login/login.php"); exit; }
+require_once "../db_connect.php";
 
-$order_id = $_SESSION['last_order_id'] ?? null;
+$order_id = $_SESSION["last_order_id"] ?? null;
 $order = null;
+$orderItems = [];
 
 if ($order_id) {
-    $stmt = $conn->prepare("SELECT order_id, total_amount, payment_method FROM orders WHERE order_id = ? AND user_id = ?");
-    $stmt->bind_param("ii", $order_id, $_SESSION['user_id']);
+    $stmt = $conn->prepare("SELECT order_id, total_amount, payment_method, notes, delivery_type, discount_amount, promo_code, customer_name, customer_phone, delivery_address FROM orders WHERE order_id = ? AND user_id = ?");
+    $stmt->bind_param("ii", $order_id, $_SESSION["user_id"]);
     $stmt->execute();
-    $order_result = $stmt->get_result();
-    if ($order_result->num_rows > 0) {
-        $order = $order_result->fetch_assoc();
-    }
+    $r = $stmt->get_result();
+    if ($r->num_rows > 0) { $order = $r->fetch_assoc(); }
     $stmt->close();
-    // Hapus variabel sesi agar tidak digunakan lagi pada kunjungan berikutnya
-    unset($_SESSION['last_order_id']);
+
+    if ($order) {
+        $stmt2 = $conn->prepare("SELECT od.quantity, od.price, od.subtotal, m.name as menu_name, m.image FROM order_details od JOIN menu m ON od.menu_id = m.menu_id WHERE od.order_id = ?");
+        $stmt2->bind_param("i", $order_id);
+        $stmt2->execute();
+        $orderItems = $stmt2->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt2->close();
+    }
+
+    unset($_SESSION["last_order_id"]);
 }
 
-// Jika tidak ada pesanan yang valid, arahkan kembali ke halaman utama
-if (!$order) {
-    header('Location: ../index.php');
-    exit;
+if (!$order) { header("Location: ../index.php"); exit; }
+
+$isPickup = ($order["delivery_type"] ?? "delivery") === "pickup";
+$isCOD    = $order["payment_method"] === "cod" || $order["payment_method"] === "pickup";
+$isTransfer = $order["payment_method"] === "transfer";
+$subtotalRaw = array_sum(array_column($orderItems, "subtotal"));
+
+// Build WA message
+$waLines = "Halo Cimohot! Saya mau konfirmasi pesanan:\n\n";
+$waLines .= "No Pesanan: #" . $order["order_id"] . "\n";
+foreach ($orderItems as $itm) {
+    $waLines .= "- " . $itm["menu_name"] . " x" . $itm["quantity"] . " = Rp " . number_format($itm["subtotal"], 0, ",", ".") . "\n";
 }
+if ($order["discount_amount"] > 0) { $waLines .= "Diskon: -Rp " . number_format($order["discount_amount"], 0, ",", ".") . "\n"; }
+$waLines .= "Total: Rp " . number_format($order["total_amount"], 0, ",", ".") . "\n";
+$waLines .= "Metode: " . strtoupper($order["payment_method"]) . "\n";
+if ($isPickup) { $waLines .= "Pickup: Ambil Sendiri\n"; } else { $waLines .= "Alamat: " . ($order["delivery_address"] ?? "-") . "\n"; }
+if (!empty($order["notes"])) { $waLines .= "Catatan: " . $order["notes"] . "\n"; }
+if ($isTransfer) { $waLines .= "\n*Bukti transfer saya lampirkan di sini.*"; }
+$waURL = "https://wa.me/6285930194086?text=" . rawurlencode($waLines);
 ?>
 <!DOCTYPE html>
 <html lang="id">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pesanan Berhasil! - Cimohot</title>
-    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700&family=Roboto:wght@400&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
-    <style>
-        :root {
-            --primary-orange: #ff6b35;
-            --dark-orange: #e55a2e;
-            --success-green: #2ed573;
-            --light-gray: #f8f9fa;
-            --text-dark: #2c3e50;
-            --text-light: #6c757d;
-            --white: #ffffff;
-            --whatsapp-green: #25D366;
-            --bank-blue: #0066cc;
-            --warning-yellow: #ffc107;
-            --border-light: #e9ecef;
-            --ff-heading: 'Rubik', sans-serif;
-            --ff-body: 'Roboto', sans-serif;
-        }
-        body { font-family: var(--ff-body); background-color: var(--light-gray); display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 20px; }
-        .confirmation-card { background: var(--white); padding: 50px 40px; border-radius: 20px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.1); max-width: 600px; width: 90%; text-align: center; transform: scale(0.95); opacity: 0; animation: fadeInScale 0.5s 0.2s forwards; }
-        @keyframes fadeInScale { to { transform: scale(1); opacity: 1; } }
-        .checkmark-container { width: 100px; height: 100px; margin: 0 auto 20px; }
-        .checkmark-circle { stroke-dasharray: 166; stroke-dashoffset: 166; stroke-width: 3; stroke: var(--success-green); fill: none; animation: stroke 0.6s cubic-bezier(0.65, 0, 0.45, 1) forwards; }
-        .checkmark { width: 100px; height: 100px; border-radius: 50%; display: block; stroke-width: 3; stroke: var(--white); stroke-miterlimit: 10; box-shadow: inset 0px 0px 0px var(--success-green); animation: scale .3s ease-in-out .9s both, fill .3s ease-in-out .6s both; }
-        .checkmark-check { transform-origin: 50% 50%; stroke-dasharray: 48; stroke-dashoffset: 48; animation: stroke 0.3s cubic-bezier(0.65, 0, 0.45, 1) 0.8s forwards; }
-        @keyframes stroke { 100% { stroke-dashoffset: 0; } }
-        @keyframes scale { 0%, 100% { transform: none; } 50% { transform: scale3d(1.1, 1.1, 1); } }
-        @keyframes fill { 100% { box-shadow: inset 0px 0px 0px 50px var(--success-green); } }
-        h1 { font-family: var(--ff-heading); font-size: 2.2rem; margin-bottom: 10px; color: var(--text-dark); }
-        .order-id-text { font-size: 1.1rem; color: var(--text-light); margin-bottom: 25px; }
-        .order-id-text strong { color: var(--primary-orange); }
-        
-        /* Payment Details Styling */
-        .payment-details { background: linear-gradient(135deg, #fff8f5 0%, #ffeee6 100%); border: 2px solid var(--primary-orange); padding: 30px; border-radius: 16px; margin-bottom: 30px; text-align: left; box-shadow: 0 5px 15px rgba(255, 107, 53, 0.1); }
-        .payment-details h3 { font-family: var(--ff-heading); font-size: 1.4rem; margin-bottom: 20px; color: var(--dark-orange); text-align: center; display: flex; align-items: center; justify-content: center; gap: 10px; }
-        .payment-details h3::before { content: "💳"; font-size: 1.2em; }
-        
-        .total-amount { background: var(--primary-orange); color: var(--white); padding: 15px 20px; border-radius: 12px; text-align: center; margin-bottom: 25px; font-size: 1.3rem; font-weight: 700; box-shadow: 0 3px 10px rgba(255, 107, 53, 0.3); }
-        
-        .bank-accounts { display: grid; gap: 15px; margin-bottom: 25px; }
-        .bank-item { background: var(--white); border: 2px solid var(--border-light); border-radius: 12px; padding: 20px; transition: all 0.3s ease; cursor: pointer; position: relative; }
-        .bank-item:hover { border-color: var(--bank-blue); box-shadow: 0 5px 15px rgba(0, 102, 204, 0.1); transform: translateY(-2px); }
-        .bank-name { font-weight: 700; font-size: 1.1rem; color: var(--bank-blue); margin-bottom: 8px; display: flex; align-items: center; gap: 10px; }
-        .bank-name::before { content: "🏦"; }
-        .bank-account { font-size: 1.2rem; font-weight: 600; color: var(--text-dark); margin-bottom: 5px; font-family: monospace; letter-spacing: 1px; }
-        .bank-holder { color: var(--text-light); font-size: 0.95rem; }
-        
-        .important-notice { background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%); border: 2px solid var(--warning-yellow); border-radius: 12px; padding: 20px; margin-bottom: 25px; }
-        .important-notice h4 { font-family: var(--ff-heading); font-size: 1.2rem; color: #856404; margin-bottom: 15px; display: flex; align-items: center; gap: 10px; }
-        .important-notice h4::before { content: "⚠️"; }
-        .important-notice p { color: #856404; margin-bottom: 10px; line-height: 1.6; }
-        
-        .whatsapp-section { background: linear-gradient(135deg, #e8f8f5 0%, #d1f2eb 100%); border: 2px solid var(--whatsapp-green); border-radius: 12px; padding: 25px; margin-bottom: 25px; text-align: center; }
-        .whatsapp-section h4 { font-family: var(--ff-heading); font-size: 1.3rem; color: var(--whatsapp-green); margin-bottom: 15px; display: flex; align-items: center; justify-content: center; gap: 10px; }
-        .whatsapp-section h4::before { content: "📱"; }
-        .whatsapp-btn { display: inline-block; background: var(--whatsapp-green); color: var(--white); text-decoration: none; padding: 15px 30px; border-radius: 50px; font-weight: 600; font-size: 1.1rem; transition: all 0.3s ease; margin-top: 15px; box-shadow: 0 5px 15px rgba(37, 211, 102, 0.3); }
-        .whatsapp-btn:hover { background: #128c7e; transform: translateY(-2px); box-shadow: 0 8px 25px rgba(37, 211, 102, 0.4); }
-        .whatsapp-btn::before { content: "📲"; margin-right: 8px; }
-        
-        .format-message { background: var(--white); border: 2px dashed var(--whatsapp-green); border-radius: 8px; padding: 15px; margin-top: 15px; font-family: monospace; font-size: 0.95rem; color: var(--text-dark); position: relative; }
-        .format-message::before { content: "💬"; position: absolute; top: -10px; left: 15px; background: var(--white); padding: 0 5px; }
-        
-        .btn-group { display: flex; flex-direction: column; gap: 15px; align-items: center; }
-        .btn { text-decoration: none; width: 100%; text-align: center; padding: 15px 25px; border-radius: 8px; font-weight: 500; font-size: 1rem; transition: all 0.3s ease; }
-        .btn-primary { background: var(--primary-orange); color: var(--white); }
-        .btn-primary:hover { background: var(--dark-orange); transform: translateY(-2px); box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1); }
-        .btn-secondary { color: var(--text-light); font-weight: 400; text-decoration: underline; }
-        .btn-secondary:hover { color: var(--text-dark); }
-        
-        .steps { text-align: left; margin-bottom: 20px; }
-        .step { display: flex; align-items: flex-start; margin-bottom: 15px; }
-        .step-number { background: var(--primary-orange); color: var(--white); width: 25px; height: 25px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.9rem; margin-right: 15px; flex-shrink: 0; }
-        .step-content { flex: 1; }
-        .step-title { font-weight: 600; color: var(--text-dark); margin-bottom: 5px; }
-        .step-desc { color: var(--text-light); font-size: 0.9rem; line-height: 1.4; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pesanan Berhasil! - Cimohot</title>
+<meta name="robots" content="noindex">
+<link rel="icon" type="image/png" sizes="32x32" href="../assets/images/favicon-32x32.png?v=2">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
+<style>
+:root {
+    --bg:#09090B;--surface:#131316;--card:#1A1A1F;--elevated:#212128;
+    --border:rgba(255,255,255,0.07);--red:#FF3D2E;--red-glow:rgba(255,61,46,0.22);
+    --gold:#F5A623;--green:#22C55E;--blue:#38BDF8;--wa:#25D366;
+    --text:#FAFAFA;--muted:#9CA3AF;--dim:#6B7280;
+    --r-sm:8px;--r-md:14px;--r-lg:20px;--r-xl:24px;--r-full:9999px;
+    --t:all 0.22s cubic-bezier(0.4,0,0.2,1);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Plus Jakarta Sans",sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:24px 16px 60px;position:relative;overflow-x:hidden}
+body::before{content:"";position:fixed;top:-10%;left:50%;transform:translateX(-50%);width:700px;height:400px;background:radial-gradient(ellipse,rgba(34,197,94,0.1) 0%,transparent 65%);z-index:0;pointer-events:none;filter:blur(60px)}
+
+/* Header */
+.conf-header{width:100%;max-width:660px;display:flex;align-items:center;justify-content:space-between;margin-bottom:28px;z-index:1;position:relative}
+.conf-logo{display:flex;align-items:center;gap:10px;text-decoration:none}
+.conf-logo .lm{width:34px;height:34px;background:var(--red);border-radius:var(--r-sm);display:flex;align-items:center;justify-content:center;font-size:0.9rem;font-weight:800;color:#fff}
+.conf-logo .lt{font-size:1.15rem;font-weight:800;color:#fff}
+.conf-logo .lt span{color:var(--red)}
+.home-btn{display:inline-flex;align-items:center;gap:7px;padding:8px 16px;border-radius:var(--r-full);font-size:0.83rem;font-weight:600;color:var(--muted);background:rgba(255,255,255,0.04);border:1px solid var(--border);text-decoration:none;transition:var(--t)}
+.home-btn:hover{color:var(--text);background:rgba(255,255,255,0.08)}
+
+/* Card */
+.conf-card{width:100%;max-width:660px;background:var(--card);border:1px solid var(--border);border-radius:var(--r-xl);overflow:hidden;box-shadow:0 30px 70px rgba(0,0,0,0.5);position:relative;z-index:1;animation:fadeUp 0.5s ease forwards;opacity:0;transform:translateY(20px)}
+@keyframes fadeUp{to{opacity:1;transform:translateY(0)}}
+
+/* Success Header */
+.success-head{text-align:center;padding:40px 32px 28px;background:linear-gradient(180deg,rgba(34,197,94,0.08) 0%,transparent 100%);border-bottom:1px solid var(--border);position:relative}
+.check-wrap{width:80px;height:80px;margin:0 auto 20px;position:relative}
+.check-bg{width:80px;height:80px;border-radius:50%;background:rgba(34,197,94,0.12);border:2px solid rgba(34,197,94,0.3);display:flex;align-items:center;justify-content:center;animation:popIn 0.5s 0.3s ease both}
+@keyframes popIn{0%{transform:scale(0)}80%{transform:scale(1.12)}100%{transform:scale(1)}}
+.check-icon{font-size:2.5rem;animation:fadeIn 0.3s 0.6s ease both;opacity:0}
+@keyframes fadeIn{to{opacity:1}}
+.success-title{font-size:1.8rem;font-weight:800;color:var(--text);margin-bottom:8px}
+.order-num{display:inline-flex;align-items:center;gap:8px;padding:6px 16px;background:rgba(255,61,46,0.1);border:1px solid rgba(255,61,46,0.25);border-radius:var(--r-full);font-size:0.85rem;font-weight:700;color:var(--red);margin-bottom:14px}
+.eta-badge{display:inline-flex;align-items:center;gap:7px;padding:7px 16px;background:rgba(245,166,35,0.1);border:1px solid rgba(245,166,35,0.25);border-radius:var(--r-full);font-size:0.82rem;font-weight:600;color:var(--gold)}
+
+/* Section wrapper */
+.section{padding:24px 28px;border-bottom:1px solid var(--border)}
+.section:last-child{border-bottom:none}
+.sec-title{display:flex;align-items:center;gap:9px;font-size:0.82rem;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:16px}
+.sec-icon{font-size:1rem;color:var(--red)}
+
+/* Order Items */
+.order-item-row{display:flex;align-items:center;gap:14px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.04)}
+.order-item-row:last-of-type{border-bottom:none}
+.oi-img{width:52px;height:52px;border-radius:var(--r-sm);object-fit:cover;border:1px solid var(--border);flex-shrink:0}
+.oi-info{flex:1;min-width:0}
+.oi-name{font-size:0.9rem;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.oi-qty{font-size:0.78rem;color:var(--dim);margin-top:2px}
+.oi-sub{font-size:0.88rem;font-weight:700;color:var(--gold);flex-shrink:0}
+
+/* Price summary */
+.price-row{display:flex;justify-content:space-between;align-items:center;font-size:0.88rem;color:var(--muted);margin-bottom:10px}
+.price-row span:last-child{color:var(--text);font-weight:600}
+.price-row.disc span:last-child{color:var(--green)}
+.price-divider{border:none;border-top:1px solid var(--border);margin:12px 0}
+.price-total{display:flex;justify-content:space-between;align-items:center;font-weight:800;font-size:1.1rem}
+.total-val{color:var(--gold);font-size:1.2rem}
+
+/* Delivery info */
+.info-row{display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;font-size:0.87rem}
+.info-row:last-child{margin-bottom:0}
+.info-icon{font-size:1rem;flex-shrink:0;margin-top:1px;color:var(--muted)}
+.info-label{color:var(--dim);width:80px;flex-shrink:0}
+.info-val{color:var(--text);font-weight:600;flex:1;word-break:break-word}
+
+/* Bank info */
+.bank-card{background:var(--elevated);border:1px solid var(--border);border-radius:var(--r-md);padding:18px 20px;margin-bottom:12px;cursor:pointer;transition:var(--t)}
+.bank-card:hover{border-color:rgba(56,189,248,0.4);box-shadow:0 4px 20px rgba(56,189,248,0.1);transform:translateY(-1px)}
+.bank-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.bank-name{font-size:0.82rem;font-weight:800;color:var(--blue);text-transform:uppercase;letter-spacing:0.5px}
+.copy-btn{display:inline-flex;align-items:center;gap:5px;padding:4px 12px;background:rgba(56,189,248,0.1);border:1px solid rgba(56,189,248,0.25);color:var(--blue);border-radius:var(--r-full);font-size:0.72rem;font-weight:700;cursor:pointer;transition:var(--t)}
+.copy-btn:hover{background:var(--blue);color:#fff}
+.copy-btn.copied{background:rgba(34,197,94,0.15);border-color:var(--green);color:var(--green)}
+.bank-account{font-size:1.35rem;font-weight:800;font-family:monospace;letter-spacing:2px;color:var(--text);margin-bottom:4px}
+.bank-holder{font-size:0.8rem;color:var(--dim)}
+.total-box{background:linear-gradient(135deg,rgba(255,61,46,0.1),rgba(245,166,35,0.08));border:1px solid rgba(255,61,46,0.25);border-radius:var(--r-md);padding:14px 20px;text-align:center;margin-bottom:20px;font-size:1.3rem;font-weight:800;color:var(--gold)}
+
+/* Payment steps */
+.pay-steps{display:flex;flex-direction:column;gap:12px;margin-bottom:0}
+.pay-step{display:flex;align-items:flex-start;gap:12px}
+.step-num{width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,var(--red),#FF6B35);color:#fff;display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:800;flex-shrink:0}
+.step-txt strong{display:block;font-size:0.88rem;font-weight:700;color:var(--text);margin-bottom:2px}
+.step-txt span{font-size:0.8rem;color:var(--dim)}
+
+/* WA Button */
+.wa-section{background:rgba(37,211,102,0.06);border:1px solid rgba(37,211,102,0.2);border-radius:var(--r-md);padding:20px;text-align:center}
+.wa-section h4{font-size:1rem;font-weight:800;color:var(--wa);margin-bottom:6px}
+.wa-section p{font-size:0.83rem;color:var(--muted);margin-bottom:14px;line-height:1.5}
+.wa-btn{display:inline-flex;align-items:center;gap:9px;padding:13px 28px;background:var(--wa);color:#fff;font-weight:800;font-size:0.95rem;border-radius:var(--r-full);text-decoration:none;transition:var(--t);box-shadow:0 6px 20px rgba(37,211,102,0.3)}
+.wa-btn:hover{background:#1db954;transform:translateY(-2px);box-shadow:0 10px 28px rgba(37,211,102,0.45)}
+
+/* COD info */
+.cod-box{background:rgba(245,166,35,0.07);border:1px solid rgba(245,166,35,0.2);border-radius:var(--r-md);padding:18px 20px}
+.cod-box h4{font-size:0.95rem;font-weight:800;color:var(--gold);margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.cod-box p{font-size:0.85rem;color:var(--muted);line-height:1.6}
+.cod-amount{font-size:1.5rem;font-weight:800;color:var(--gold);display:block;margin:10px 0 4px}
+
+/* CTA Buttons */
+.cta-section{padding:24px 28px;display:flex;flex-direction:column;gap:10px}
+.btn-track{display:flex;align-items:center;justify-content:center;gap:10px;padding:15px;background:linear-gradient(135deg,var(--red),#D62018);color:#fff;font-weight:800;font-size:0.98rem;border-radius:var(--r-lg);text-decoration:none;transition:var(--t);box-shadow:0 8px 25px rgba(255,61,46,0.3)}
+.btn-track:hover{transform:translateY(-2px);box-shadow:0 12px 30px rgba(255,61,46,0.45)}
+.btn-reorder{display:flex;align-items:center;justify-content:center;gap:10px;padding:13px;background:rgba(255,255,255,0.04);border:1px solid var(--border);color:var(--muted);font-weight:600;font-size:0.92rem;border-radius:var(--r-lg);text-decoration:none;transition:var(--t)}
+.btn-reorder:hover{color:var(--text);background:rgba(255,255,255,0.07)}
+
+@media(max-width:600px){.section{padding:20px 18px}.success-head{padding:32px 20px 22px}.success-title{font-size:1.5rem}.bank-account{font-size:1.15rem;letter-spacing:1px}.cta-section{padding:20px 18px}}
+</style>
 </head>
 <body>
-    <div class="confirmation-card">
-        <div class="checkmark-container">
-            <svg class="checkmark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52">
-                <circle class="checkmark-circle" cx="26" cy="26" r="25" fill="none"/>
-                <path class="checkmark-check" fill="none" d="M14.1 27.2l7.1 7.2 16.7-16.8"/>
-            </svg>
+
+<div class="conf-header">
+    <a href="../index.php" class="conf-logo">
+        <div class="lm">Ci</div>
+        <div class="lt">Cimohot<span>.</span></div>
+    </a>
+    <a href="../index.php" class="home-btn">&#x2190; Beranda</a>
+</div>
+
+<div class="conf-card">
+
+    <!-- Success Header -->
+    <div class="success-head">
+        <div class="check-wrap">
+            <div class="check-bg">
+                <span class="check-icon">&#x2705;</span>
+            </div>
         </div>
-
-        <h1>Pesanan Diterima!</h1>
-        <p class="order-id-text">Pesanan Anda dengan ID <strong>#<?php echo htmlspecialchars($order['order_id']); ?></strong> sedang kami proses.</p>
-        
-        <?php if ($order['payment_method'] == 'cod'): ?>
-            <div class="payment-details">
-                <h3>Metode Pembayaran: Bayar di Tempat (COD)</h3>
-                <p>Silakan siapkan uang tunai sejumlah <strong>Rp <?php echo number_format($order['total_amount'], 0, ',', '.'); ?></strong> untuk dibayarkan saat pesanan tiba atau diambil.</p>
-            </div>
-        <?php elseif ($order['payment_method'] == 'transfer'): ?>
-            <div class="payment-details">
-                <h3>Transfer Bank</h3>
-                
-                <div class="total-amount">
-                    Total Pembayaran: Rp <?php echo number_format($order['total_amount'], 0, ',', '.'); ?>
-                </div>
-                
-                <div class="bank-item">
-                <div class="bank-name">Bank BCA</div>
-                <div class="bank-account">1234567890</div>
-                <div class="bank-holder">a/n Cimohot Indonesia</div>
-            </div>
-
-            <div class="bank-item">
-                <div class="bank-name">Bank Mandiri</div>
-                <div class="bank-account">0987654321</div>
-                <div class="bank-holder">a/n Cimohot Indonesia</div>
-            </div>
-                
-                <div class="important-notice">
-                    <h4>Langkah Pembayaran</h4>
-                    <div class="steps">
-                        <div class="step">
-                            <div class="step-number">1</div>
-                            <div class="step-content">
-                                <div class="step-title">Transfer ke salah satu rekening</div>
-                                <div class="step-desc">Pilih bank yang mudah untuk Anda dan transfer sesuai jumlah total</div>
-                            </div>
-                        </div>
-                        <div class="step">
-                            <div class="step-number">2</div>
-                            <div class="step-content">
-                                <div class="step-title">Screenshot bukti transfer</div>
-                                <div class="step-desc">Ambil foto atau screenshot bukti transfer dari aplikasi banking</div>
-                            </div>
-                        </div>
-                        <div class="step">
-                            <div class="step-number">3</div>
-                            <div class="step-content">
-                                <div class="step-title">Kirim ke WhatsApp</div>
-                                <div class="step-desc">Kirim bukti transfer ke nomor WhatsApp kami dengan format yang telah ditentukan</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="whatsapp-section">
-                    <h4>Kirim Bukti Transfer</h4>
-                    <p style="color: var(--text-dark); margin-bottom: 15px;">
-                        Setelah transfer, segera kirimkan bukti pembayaran ke WhatsApp kami:
-                    </p>
-                    
-                    <div class="format-message">
-                        BUKTI TRANSFER - #<?php echo htmlspecialchars($order['order_id']); ?>
-                    </div>
-                    
-                    <a href="https://wa.me/6285930194086?text=BUKTI%20TRANSFER%20-%20%23<?php echo htmlspecialchars($order['order_id']); ?>" 
-                       target="_blank" 
-                       class="whatsapp-btn">
-                        Kirim ke WhatsApp
-                    </a>
-                    
-                    <p style="color: var(--text-light); font-size: 0.9rem; margin-top: 15px;">
-                        Nomor WhatsApp: <strong>0859-3019-4086</strong>
-                    </p>
-                </div>
-            </div>
-        <?php endif; ?>
-        
-        <div class="btn-group">
-            <a href="../akun.php#riwayat" class="btn btn-primary">Lihat Status Pesanan</a>
-            <a href="../index.php" class="btn btn-secondary">Kembali ke Beranda</a>
+        <h1 class="success-title">Pesanan Masuk!</h1>
+        <div class="order-num">&#x1F4CB; No. Pesanan #<?php echo htmlspecialchars($order["order_id"]); ?></div>
+        <br>
+        <div class="eta-badge">
+            &#x23F1;&#xFE0F; Estimasi diproses: <?php echo $isPickup ? "Siap dalam ~20 menit" : "~15-30 menit"; ?>
         </div>
     </div>
 
-    <script>
-        document.addEventListener('DOMContentLoaded', function () {
-            confetti({
-                particleCount: 150,
-                spread: 180,
-                origin: { y: 0.6 }
-            });
-        });
-        
-        function copyAccount(event, accountNumber) {
-    navigator.clipboard.writeText(accountNumber).then(function() {
-        const btn = event.currentTarget;
-        const originalText = btn.textContent;
+    <!-- Order Items -->
+    <div class="section">
+        <div class="sec-title">
+            <span class="sec-icon">&#x1F6D2;</span> Item yang Dipesan
+        </div>
+        <?php foreach ($orderItems as $item): ?>
+        <div class="order-item-row">
+            <img src="../<?php echo htmlspecialchars($item["image"]); ?>" alt="<?php echo htmlspecialchars($item["menu_name"]); ?>" class="oi-img" onerror="this.style.display='none'">
+            <div class="oi-info">
+                <div class="oi-name"><?php echo htmlspecialchars($item["menu_name"]); ?></div>
+                <div class="oi-qty"><?php echo $item["quantity"]; ?> x Rp <?php echo number_format($item["price"], 0, ",", "."); ?></div>
+            </div>
+            <div class="oi-sub">Rp <?php echo number_format($item["subtotal"], 0, ",", "."); ?></div>
+        </div>
+        <?php endforeach; ?>
+        <div style="margin-top:16px">
+            <div class="price-row"><span>Subtotal</span><span>Rp <?php echo number_format($subtotalRaw, 0, ",", "."); ?></span></div>
+            <?php if ($order["discount_amount"] > 0): ?>
+            <div class="price-row disc"><span>Diskon (<?php echo htmlspecialchars($order["promo_code"] ?? "-"); ?>)</span><span>-Rp <?php echo number_format($order["discount_amount"], 0, ",", "."); ?></span></div>
+            <?php endif; ?>
+            <div class="price-row"><span>Biaya Layanan</span><span>Gratis</span></div>
+            <hr class="price-divider">
+            <div class="price-total"><span>Total Bayar</span><span class="total-val">Rp <?php echo number_format($order["total_amount"], 0, ",", "."); ?></span></div>
+        </div>
+    </div>
 
-        // Mengambil warna dari variabel CSS
-        const rootStyles = getComputedStyle(document.documentElement);
-        const successColor = rootStyles.getPropertyValue('--success-green').trim();
-        const primaryColor = rootStyles.getPropertyValue('--primary-orange').trim();
+    <!-- Delivery Info -->
+    <div class="section">
+        <div class="sec-title"><span class="sec-icon">&#x1F4CD;</span> Info Pengiriman</div>
+        <div class="info-row"><span class="info-icon">&#x1F464;</span><span class="info-label">Pemesan</span><span class="info-val"><?php echo htmlspecialchars($order["customer_name"]); ?></span></div>
+        <div class="info-row"><span class="info-icon">&#x1F4DE;</span><span class="info-label">No. HP</span><span class="info-val"><?php echo htmlspecialchars($order["customer_phone"] ?? "-"); ?></span></div>
+        <div class="info-row"><span class="info-icon"><?php echo $isPickup ? "&#x1F3EA;" : "&#x1F3E0;"; ?></span><span class="info-label"><?php echo $isPickup ? "Metode" : "Alamat"; ?></span><span class="info-val"><?php echo $isPickup ? "Ambil Sendiri di Toko" : htmlspecialchars($order["delivery_address"] ?? "-"); ?></span></div>
+        <?php if (!empty($order["notes"])): ?>
+        <div class="info-row"><span class="info-icon">&#x1F4DD;</span><span class="info-label">Catatan</span><span class="info-val" style="color:var(--gold);font-style:italic"><?php echo htmlspecialchars($order["notes"]); ?></span></div>
+        <?php endif; ?>
+    </div>
 
-        // Ubah tampilan tombol untuk feedback
-        btn.textContent = 'Tersalin!';
-        btn.style.backgroundColor = successColor;
+    <!-- Payment Section -->
+    <?php if ($isTransfer): ?>
+    <div class="section">
+        <div class="sec-title"><span class="sec-icon">&#x1F3E6;</span> Instruksi Transfer</div>
+        <div class="total-box">Transfer Sebesar: Rp <?php echo number_format($order["total_amount"], 0, ",", "."); ?></div>
+        <div class="bank-card" onclick="copyAcct(this,'1234567890')">
+            <div class="bank-header">
+                <div class="bank-name">&#x1F3E6; Bank BCA</div>
+                <button class="copy-btn" onclick="event.stopPropagation();copyAcct(this,'1234567890')">&#x1F4CB; Salin</button>
+            </div>
+            <div class="bank-account">1234-5678-90</div>
+            <div class="bank-holder">a/n Cimohot Indonesia</div>
+        </div>
+        <div class="bank-card" onclick="copyAcct(this,'0987654321')">
+            <div class="bank-header">
+                <div class="bank-name">&#x1F3E6; Bank Mandiri</div>
+                <button class="copy-btn" onclick="event.stopPropagation();copyAcct(this,'0987654321')">&#x1F4CB; Salin</button>
+            </div>
+            <div class="bank-account">0987-6543-21</div>
+            <div class="bank-holder">a/n Cimohot Indonesia</div>
+        </div>
+        <div class="pay-steps">
+            <div class="pay-step"><div class="step-num">1</div><div class="step-txt"><strong>Transfer ke salah satu rekening di atas</strong><span>Sesuai total Rp <?php echo number_format($order["total_amount"], 0, ",", "."); ?></span></div></div>
+            <div class="pay-step"><div class="step-num">2</div><div class="step-txt"><strong>Screenshot bukti transfer</strong><span>Dari aplikasi mobile banking atau ATM kamu</span></div></div>
+            <div class="pay-step"><div class="step-num">3</div><div class="step-txt"><strong>Kirim ke WhatsApp kami</strong><span>Format sudah disiapkan, tinggal kirim!</span></div></div>
+        </div>
+    </div>
+    <div class="section">
+        <div class="wa-section">
+            <h4>&#x1F4F2; Kirim Bukti Transfer</h4>
+            <p>Pesan WA sudah diformat otomatis dengan detail pesananmu. Tinggal klik dan kirim!</p>
+            <a href="<?php echo htmlspecialchars($waURL); ?>" target="_blank" rel="noopener" class="wa-btn">
+                &#x1F4AC; Kirim via WhatsApp
+            </a>
+        </div>
+    </div>
+    <?php else: ?>
+    <div class="section">
+        <div class="cod-box">
+            <h4>&#x1F4B5; <?php echo $isPickup ? "Bayar di Kasir" : "Bayar di Tempat (COD)"; ?></h4>
+            <span class="cod-amount">Rp <?php echo number_format($order["total_amount"], 0, ",", "."); ?></span>
+            <p><?php echo $isPickup ? "Siapkan uang atau metode bayar saat datang ke toko ya! Tunjukkan nomor pesanan #" . $order["order_id"] . " ke kasir." : "Siapkan uang tunai sejumlah Rp " . number_format($order["total_amount"], 0, ",", ".") . " untuk dibayarkan saat pesanan tiba."; ?></p>
+        </div>
+    </div>
+    <div class="section">
+        <div class="wa-section">
+            <h4>&#x1F4F2; Konfirmasi via WhatsApp</h4>
+            <p>Mau tanya status pesanan atau ada pertanyaan? Langsung chat kami aja!</p>
+            <a href="<?php echo htmlspecialchars($waURL); ?>" target="_blank" rel="noopener" class="wa-btn">
+                &#x1F4AC; Chat WhatsApp
+            </a>
+        </div>
+    </div>
+    <?php endif; ?>
 
-        // Kembalikan tampilan tombol setelah 2 detik
-        setTimeout(() => {
-            btn.textContent = originalText;
-            btn.style.backgroundColor = primaryColor;
-        }, 2000);
-    }, function(err) {
-        console.error('Gagal menyalin teks: ', err);
-        alert('Gagal menyalin nomor rekening.');
-    });
+    <!-- CTA -->
+    <div class="cta-section">
+        <a href="../akun.php#riwayat" class="btn-track">&#x1F4E6; Lacak Status Pesanan</a>
+        <a href="../index.php#food-menu" class="btn-reorder">&#x1F37D;&#xFE0F; Pesan Lagi</a>
+    </div>
+
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    // Confetti
+    setTimeout(() => {
+        confetti({ particleCount: 120, spread: 160, origin: { y: 0.5 }, colors: ["#FF3D2E","#F5A623","#22C55E","#FAFAFA"] });
+    }, 600);
+});
+
+function copyAcct(el, account) {
+    const btn = el.classList.contains("copy-btn") ? el : el.querySelector(".copy-btn");
+    navigator.clipboard.writeText(account).then(() => {
+        btn.textContent = "✓ Tersalin!";
+        btn.classList.add("copied");
+        setTimeout(() => { btn.textContent = "Salin"; btn.classList.remove("copied"); }, 2500);
+    }).catch(() => { alert("Nomor rekening: " + account); });
 }
-    </script>
+</script>
 </body>
 </html>

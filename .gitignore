@@ -1,0 +1,44 @@
+# Dependencies
+/admin-laravel/vendor/
+/admin-laravel/node_modules/
+node_modules/
+vendor/
+
+# Environment
+.env
+.env.backup
+.env.production
+admin-laravel/.env
+admin-laravel/.env.backup
+
+# Testing & Cache
+.phpunit.result.cache
+*.phpunit.result.cache
+/admin-laravel/.phpunit.cache
+/admin-laravel/.phpunit.result.cache
+/admin-laravel/storage/*.key
+/admin-laravel/storage/framework/cache/*
+/admin-laravel/storage/framework/sessions/*
+/admin-laravel/storage/framework/views/*
+/admin-laravel/storage/logs/*
+!/admin-laravel/storage/framework/cache/.gitignore
+!/admin-laravel/storage/framework/sessions/.gitignore
+!/admin-laravel/storage/framework/views/.gitignore
+!/admin-laravel/storage/logs/.gitignore
+
+# IDE & Editor
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+.fleet/
+
+# Temporary / Scratch
+scratch/
+test_db.php
+buat_hash.php
+*.sql
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

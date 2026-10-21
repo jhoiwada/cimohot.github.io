@@ -1,7 +1,7 @@
 <?php
 session_start();
 if (!isset($_SESSION['user_id'])) {
-    header('Location: login.php');
+    header('Location: login/login.php');
     exit;
 }
 
@@ -9,353 +9,854 @@ require_once 'db_connect.php';
 
 $user_id = $_SESSION['user_id'];
 
-// Ambil data profil pengguna terbaru
-$user_stmt = $conn->prepare("SELECT name, email, phone, address FROM users WHERE user_id = ?");
+// Mengambil detail pengguna
+$user_stmt = $conn->prepare("SELECT name, email, phone, address, created_at FROM users WHERE user_id = ?");
 $user_stmt->bind_param("i", $user_id);
 $user_stmt->execute();
 $user = $user_stmt->get_result()->fetch_assoc();
 $user_stmt->close();
 
-// Ambil riwayat pesanan pengguna
+// Fallback jika created_at null
+$join_date = isset($user['created_at']) && $user['created_at'] ? date('M Y', strtotime($user['created_at'])) : '2024';
+
+// Mengambil riwayat pesanan pengguna
 $orders_stmt = $conn->prepare("SELECT order_id, total_amount, status, order_date FROM orders WHERE user_id = ? ORDER BY order_date DESC");
 $orders_stmt->bind_param("i", $user_id);
 $orders_stmt->execute();
 $orders = $orders_stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 $orders_stmt->close();
+
+$total_orders = count($orders);
+$total_spent = array_sum(array_column($orders, 'total_amount'));
 ?>
 <!DOCTYPE html>
 <html lang="id">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Akun Saya - Cimohot</title>
-
-    <script>
-        const API_URL = "api.php";
-    </script>
+    <title>Akun Saya | Cimohot</title>
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/images/favicon-32x32.png?v=2">
+    <link rel="icon" type="image/png" sizes="16x16" href="assets/images/favicon-16x16.png?v=2">
+    <link rel="apple-touch-icon" sizes="180x180" href="assets/images/apple-touch-icon.png?v=2">
+    <link rel="shortcut icon" href="favicon.ico?v=2" type="image/x-icon">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700&family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Caveat:wght@600;700&display=swap" rel="stylesheet">
+    
     <script type="module" src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.esm.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 
     <style>
         :root {
-            --primary-orange: #ff6b35;
-            --dark-orange: #e55a2b;
-            --light-gray: #f0f2f5;
-            --text-dark: #2c3e50;
-            --text-light: #6c757d;
-            --border-color: #dee2e6;
-            --white: #ffffff;
-            --shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-            --ff-heading: 'Rubik', sans-serif;
-            --ff-body: 'Roboto', sans-serif;
+            --bg-dark: #0A0A0C;
+            --surface-dark: #121217;
+            --surface-card: #181820;
+            --surface-card-hover: #1F1F2A;
+            --surface-border: rgba(255, 255, 255, 0.08);
+            --primary-red: #FF3D2E;
+            --primary-red-hover: #E02B1D;
+            --warm-gold: #F5A623;
+            --spicy-orange: #FF6B35;
+            --text-primary: #FAFAFA;
+            --text-secondary: #9CA3AF;
+            --text-muted: #6B7280;
+            --input-bg: #111116;
+            --radius-md: 12px;
+            --radius-lg: 18px;
+            --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            overflow-x: hidden;
         }
 
         body {
-            font-family: var(--ff-body);
-            background-color: var(--light-gray);
-            color: var(--text-dark);
-            margin: 0;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.6;
         }
 
-        .dashboard-container {
-            display: flex;
+        /* Ambient Glow */
+        .ambient-glow {
+            position: fixed;
+            width: 500px;
+            height: 500px;
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 0;
+            filter: blur(100px);
+            opacity: 0.15;
+        }
+        .glow-top-left { top: -100px; left: -100px; background: var(--primary-red); }
+        .glow-bottom-right { bottom: -100px; right: -100px; background: var(--warm-gold); }
+
+        /* Navigation Header */
+        .header-bar {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: rgba(10, 10, 12, 0.85);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--surface-border);
+            padding: 16px 24px;
+        }
+
+        .header-inner {
             max-width: 1200px;
-            margin: 40px auto;
-            gap: 30px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .logo-wrap {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+            color: #FFF;
+        }
+
+        .profile-nav-logo {
+            width: 40px;
+            height: 40px;
+            object-fit: contain;
+            border-radius: 50%;
+            filter: drop-shadow(0 2px 10px rgba(255, 61, 46, 0.4));
+            flex-shrink: 0;
+            display: block;
+        }
+
+        .logo-text {
+            font-size: 1.3rem;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+        }
+        .logo-text span { color: var(--primary-red); }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .btn-header-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--surface-border);
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.88rem;
+            font-weight: 600;
+            transition: var(--transition);
+        }
+
+        .btn-header-link:hover {
+            color: #FFF;
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .btn-logout {
+            color: #FF5A5A;
+            border-color: rgba(255, 90, 90, 0.2);
+            background: rgba(255, 90, 90, 0.06);
+        }
+
+        .btn-logout:hover {
+            background: rgba(255, 90, 90, 0.15);
+            border-color: rgba(255, 90, 90, 0.4);
+            color: #FF7777;
+        }
+
+        /* Container & Layout */
+        .app-container {
+            max-width: 1200px;
+            margin: 32px auto 80px;
             padding: 0 20px;
-            align-items: flex-start;
+            position: relative;
+            z-index: 1;
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            gap: 28px;
+            align-items: start;
         }
 
-        .sidebar {
-            flex: 0 0 280px;
-            background: var(--white);
-            border-radius: 12px;
-            box-shadow: var(--shadow);
-            padding: 25px;
+        /* Left Card: Profile & Stats */
+        .profile-card {
+            background: var(--surface-card);
+            border: 1px solid var(--surface-border);
+            border-radius: var(--radius-lg);
+            padding: 28px;
+            position: sticky;
+            top: 90px;
         }
 
-        .main-content {
-            flex: 1;
-        }
-
-        .user-profile {
+        .profile-header {
             text-align: center;
-            padding-bottom: 20px;
-            border-bottom: 1px solid var(--border-color);
-            margin-bottom: 20px;
+            padding-bottom: 24px;
+            border-bottom: 1px solid var(--surface-border);
+            margin-bottom: 24px;
+        }
+
+        .user-avatar-wrap {
+            position: relative;
+            width: 88px;
+            height: 88px;
+            margin: 0 auto 16px;
         }
 
         .user-avatar {
-            width: 90px;
-            height: 90px;
+            width: 100%;
+            height: 100%;
             border-radius: 50%;
-            background: var(--primary-orange);
-            color: var(--white);
+            background: linear-gradient(135deg, var(--primary-red) 0%, var(--spicy-orange) 100%);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 3rem;
-            margin: 0 auto 15px;
-            font-weight: 700;
+            font-size: 2.2rem;
+            font-weight: 800;
+            color: #FFF;
+            box-shadow: 0 10px 25px rgba(255, 61, 46, 0.35);
+            border: 3px solid rgba(255, 255, 255, 0.1);
         }
 
-        .user-profile h3 {
-            font-family: var(--ff-heading);
-            font-size: 1.5rem;
-            margin-bottom: 5px;
-        }
-
-        .user-profile p {
-            color: var(--text-light);
-            font-size: 0.95rem;
-        }
-
-        .sidebar-nav a {
+        .badge-verified {
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            width: 26px;
+            height: 26px;
+            background: #10B981;
+            border-radius: 50%;
             display: flex;
             align-items: center;
-            gap: 15px;
-            padding: 15px;
-            text-decoration: none;
-            color: var(--text-dark);
-            border-radius: 8px;
-            font-weight: 500;
-            transition: all 0.3s;
-            cursor: pointer;
-            margin-top: 5px;
+            justify-content: center;
+            color: #FFF;
+            font-size: 0.9rem;
+            border: 2px solid var(--surface-card);
         }
 
-        .sidebar-nav a:hover,
-        .sidebar-nav a.active {
-            background-color: var(--primary-orange);
-            color: var(--white);
-        }
-
-        .sidebar-nav a ion-icon {
+        .profile-name {
             font-size: 1.3rem;
+            font-weight: 700;
+            color: #FFF;
+            margin-bottom: 4px;
         }
 
-        .content-card {
-            background: var(--white);
-            border-radius: 12px;
-            box-shadow: var(--shadow);
-            padding: 30px 40px;
+        .profile-email {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            word-break: break-all;
         }
 
-        .content-tab {
+        .member-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(245, 166, 35, 0.12);
+            border: 1px solid rgba(245, 166, 35, 0.3);
+            color: var(--warm-gold);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Profile Stats */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .stat-item {
+            background: var(--input-bg);
+            border: 1px solid var(--surface-border);
+            border-radius: var(--radius-md);
+            padding: 14px;
+            text-align: center;
+        }
+
+        .stat-val {
+            font-size: 1.25rem;
+            font-weight: 800;
+            color: #FFF;
+            margin-bottom: 2px;
+        }
+
+        .stat-val.money {
+            font-size: 1rem;
+            color: var(--warm-gold);
+        }
+
+        .stat-lbl {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-weight: 600;
+        }
+
+        /* Sidebar Navigation Menu */
+        .account-nav {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .nav-btn {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 12px 18px;
+            border-radius: var(--radius-md);
+            background: transparent;
+            border: 1px solid transparent;
+            color: var(--text-secondary);
+            font-size: 0.92rem;
+            font-weight: 600;
+            font-family: inherit;
+            cursor: pointer;
+            transition: var(--transition);
+            text-decoration: none;
+            width: 100%;
+            text-align: left;
+        }
+
+        .nav-btn ion-icon {
+            font-size: 1.25rem;
+        }
+
+        .nav-btn:hover {
+            background: rgba(255, 255, 255, 0.04);
+            color: #FFF;
+        }
+
+        .nav-btn.active {
+            background: rgba(255, 61, 46, 0.12);
+            color: #FFF;
+            border-color: rgba(255, 61, 46, 0.3);
+        }
+
+        .nav-btn.active ion-icon {
+            color: var(--primary-red);
+        }
+
+        /* Right Side: Tab Contents */
+        .main-card {
+            background: var(--surface-card);
+            border: 1px solid var(--surface-border);
+            border-radius: var(--radius-lg);
+            padding: 36px;
+        }
+
+        .tab-pane {
             display: none;
+            animation: fadeIn 0.3s ease forwards;
         }
 
-        .content-tab.active {
+        .tab-pane.active {
             display: block;
-            animation: fadeIn 0.5s;
         }
 
         @keyframes fadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(10px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
         }
 
-        h2 {
-            font-family: var(--ff-heading);
-            font-size: 2rem;
-            margin-bottom: 30px;
-            border-bottom: 1px solid var(--border-color);
-            padding-bottom: 15px;
+        .pane-header {
+            margin-bottom: 28px;
+            padding-bottom: 18px;
+            border-bottom: 1px solid var(--surface-border);
         }
 
-        .order-history-table {
-            width: 100%;
-            border-collapse: collapse;
+        .pane-title {
+            font-size: 1.6rem;
+            font-weight: 800;
+            color: #FFF;
+            letter-spacing: -0.5px;
+            margin-bottom: 4px;
         }
 
-        .order-history-table th,
-        .order-history-table td {
-            padding: 15px;
-            text-align: left;
-            border-bottom: 1px solid #f0f0f0;
+        .pane-subtitle {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
         }
 
-        .status {
-            padding: 5px 12px;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            font-weight: 500;
-            color: #ffffff;
-            text-transform: capitalize;
+        /* Profile Form */
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
         }
 
-        .status-pending {
-            background-color: #ffc107;
+        .form-group {
+            margin-bottom: 22px;
         }
 
-        .status-diproses {
-            background-color: #17a2b8;
+        .form-label {
+            display: block;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
         }
 
-        .status-selesai {
-            background-color: #28a745;
-        }
-
-        .status-dibatalkan {
-            background-color: #dc3545;
-        }
-
-        .profile-form .form-group {
+        .input-box {
+            position: relative;
             display: flex;
-            flex-wrap: wrap;
             align-items: center;
-            margin-bottom: 25px;
         }
 
-        .profile-form label {
-            flex-basis: 150px;
-            font-weight: 500;
-            font-size: 1rem;
-            color: var(--text-light);
-            padding-right: 20px;
+        .input-box ion-icon {
+            position: absolute;
+            left: 16px;
+            font-size: 1.2rem;
+            color: var(--text-muted);
+            pointer-events: none;
+            transition: var(--transition);
         }
 
-        .profile-form .input-wrapper {
-            flex: 1;
-        }
-
-        .profile-form input,
-        .profile-form textarea {
+        .form-input {
             width: 100%;
-            padding: 12px 15px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            font-size: 1rem;
+            background: var(--input-bg);
+            border: 1px solid var(--surface-border);
+            border-radius: var(--radius-md);
+            padding: 13px 16px 13px 46px;
+            color: #FFF;
+            font-size: 0.95rem;
+            font-family: inherit;
+            outline: none;
+            transition: var(--transition);
         }
 
-        .profile-form input:disabled {
-            background-color: #e9ecef;
+        .form-input:focus {
+            border-color: var(--primary-red);
+            background: #1B1B24;
+            box-shadow: 0 0 0 3px rgba(255, 61, 46, 0.15);
+        }
+
+        .form-input:focus ~ ion-icon {
+            color: var(--primary-red);
+        }
+
+        .form-input:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            background: #15151B;
+        }
+
+        textarea.form-input {
+            padding-left: 16px;
+            resize: vertical;
+            min-height: 100px;
         }
 
         .form-actions {
-            padding-top: 20px;
             margin-top: 10px;
-            text-align: right;
-            border-top: 1px solid var(--border-color);
+            display: flex;
+            justify-content: flex-end;
         }
 
         .btn-save {
-            background-color: var(--primary-orange);
-            color: var(--white);
+            background: linear-gradient(135deg, var(--primary-red) 0%, #D82213 100%);
             border: none;
-            padding: 12px 25px;
-            border-radius: 8px;
+            border-radius: var(--radius-md);
+            color: #FFF;
+            padding: 13px 32px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            font-family: inherit;
             cursor: pointer;
-            font-size: 1rem;
-            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 8px 20px rgba(255, 61, 46, 0.35);
+            transition: var(--transition);
+        }
+
+        .btn-save:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 25px rgba(255, 61, 46, 0.45);
         }
 
         .btn-save:disabled {
-            background-color: #ccc;
+            opacity: 0.65;
+            cursor: not-allowed;
+            transform: none;
         }
 
-        @media (max-width: 768px) {
-            .dashboard-container {
-                flex-direction: column;
+        /* Orders Table & Cards */
+        .empty-orders {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+        }
+
+        .empty-orders ion-icon {
+            font-size: 3.5rem;
+            color: var(--text-muted);
+            margin-bottom: 16px;
+        }
+
+        .empty-orders h3 {
+            font-size: 1.2rem;
+            color: #FFF;
+            margin-bottom: 8px;
+        }
+
+        .empty-orders p {
+            font-size: 0.9rem;
+            margin-bottom: 20px;
+        }
+
+        .orders-table-wrapper {
+            overflow-x: auto;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--surface-border);
+        }
+
+        .orders-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.92rem;
+        }
+
+        .orders-table th {
+            background: #111116;
+            color: var(--text-secondary);
+            font-weight: 600;
+            text-align: left;
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--surface-border);
+            text-transform: uppercase;
+            font-size: 0.78rem;
+            letter-spacing: 0.5px;
+        }
+
+        .orders-table td {
+            padding: 16px 18px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            color: #E2E8F0;
+        }
+
+        .orders-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .orders-table tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .order-id-badge {
+            font-family: monospace;
+            font-weight: 700;
+            color: var(--spicy-orange);
+            background: rgba(255, 107, 53, 0.1);
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+        }
+
+        .order-status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .status-pending {
+            background: rgba(245, 166, 35, 0.12);
+            color: #F5A623;
+            border: 1px solid rgba(245, 166, 35, 0.3);
+        }
+
+        .status-diproses {
+            background: rgba(56, 189, 248, 0.12);
+            color: #38BDF8;
+            border: 1px solid rgba(56, 189, 248, 0.3);
+        }
+
+        .status-selesai {
+            background: rgba(34, 197, 94, 0.12);
+            color: #22C55E;
+            border: 1px solid rgba(34, 197, 94, 0.3);
+        }
+
+        .status-dibatalkan {
+            background: rgba(239, 68, 68, 0.12);
+            color: #EF4444;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .order-amount {
+            font-weight: 700;
+            color: #FFF;
+        }
+
+        /* Responsive Breakpoints */
+        @media (max-width: 900px) {
+            .app-container {
+                grid-template-columns: 1fr;
+                gap: 20px;
+                margin-top: 20px;
             }
 
-            .profile-form .form-group {
-                flex-direction: column;
-                align-items: flex-start;
+            .profile-card {
+                position: static;
             }
 
-            .profile-form label {
-                margin-bottom: 8px;
-                flex-basis: auto;
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+
+            .main-card {
+                padding: 24px 20px;
+            }
+        }
+
+        @media (max-width: 600px) {
+            .header-bar {
+                padding: 12px 0;
+            }
+
+            .header-inner {
+                padding: 0 14px;
+            }
+
+            .main-card {
+                padding: 20px 14px;
+                border-radius: var(--radius-md);
+            }
+
+            .profile-card {
+                padding: 24px 16px;
+                border-radius: var(--radius-md);
+            }
+
+            .pane-title {
+                font-size: 1.35rem;
+            }
+
+            .orders-table {
+                min-width: 560px;
+            }
+
+            .orders-table th, .orders-table td {
+                padding: 12px 14px;
+            }
+
+            .stat-item {
+                padding: 10px 8px;
+            }
+
+            .stat-val {
+                font-size: 1.1rem;
             }
         }
     </style>
 </head>
 <body>
-    <div class="dashboard-container">
-        <aside class="sidebar">
-            <div class="user-profile">
-                <div class="user-avatar"><?php echo strtoupper(substr($user['name'], 0, 1)); ?></div>
-                <h3 id="sidebarName"><?php echo htmlspecialchars($user['name']); ?></h3>
-                <p><?php echo htmlspecialchars($user['email']); ?></p>
-            </div>
-            <nav class="sidebar-nav">
-                <a href="index.php"><ion-icon name="home-outline"></ion-icon> Beranda</a>
-                <a href="#profil" data-tab="profil" class="nav-link"><ion-icon name="person-outline"></ion-icon> Profil Saya</a>
-                <a href="#riwayat" data-tab="riwayat" class="nav-link"><ion-icon name="receipt-outline"></ion-icon> Riwayat Pesanan</a>
-                <a href="logout.php"><ion-icon name="log-out-outline"></ion-icon> Logout</a>
-            </nav>
-        </aside>
 
-        <main class="main-content">
-            <div id="profil" class="content-tab">
-                <div class="content-card">
-                    <h2>Edit Profil Saya</h2>
-                    <form id="profileForm" class="profile-form">
-                        <div class="form-group">
-                            <label for="name">Nama Lengkap</label>
-                            <div class="input-wrapper">
-                                <input type="text" name="name" id="name" value="<?php echo htmlspecialchars($user['name']); ?>" required>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label for="phone">Nomor Telepon</label>
-                            <div class="input-wrapper">
-                                <input type="tel" name="phone" id="phone" value="<?php echo htmlspecialchars($user['phone'] ?? ''); ?>">
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label for="email">Email</label>
-                            <div class="input-wrapper">
-                                <input type="email" id="email" value="<?php echo htmlspecialchars($user['email']); ?>" disabled>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label for="address">Alamat</label>
-                            <div class="input-wrapper">
-                                <textarea name="address" id="address" rows="3"><?php echo htmlspecialchars($user['address'] ?? ''); ?></textarea>
-                            </div>
-                        </div>
-                        <div class="form-actions">
-                            <button type="submit" class="btn-save" id="saveProfileBtn">Simpan Perubahan</button>
-                        </div>
-                    </form>
+    <?php require_once __DIR__ . '/_admin_bar.php'; ?>
+
+    <div class="ambient-glow glow-top-left"></div>
+    <div class="ambient-glow glow-bottom-right"></div>
+
+    <!-- Header -->
+    <header class="header-bar">
+        <div class="header-inner">
+            <a href="index.php" class="logo-wrap">
+                <img src="/assets/images/logo-cimohot.png" alt="Cimohot Logo" class="profile-nav-logo">
+                <div class="logo-text">Cimohot<span>.</span></div>
+            </a>
+
+            <div class="header-actions">
+                <a href="logout.php" class="btn-header-link btn-logout">
+                    <ion-icon name="log-out-outline"></ion-icon>
+                    <span>Keluar</span>
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <div class="app-container">
+        <!-- Sidebar Profile Card -->
+        <aside class="profile-card">
+            <div class="profile-header">
+                <div class="user-avatar-wrap">
+                    <div class="user-avatar" id="avatarLetter">
+                        <?php echo strtoupper(substr($user['name'], 0, 1)); ?>
+                    </div>
+                    <div class="badge-verified">
+                        <ion-icon name="checkmark-outline"></ion-icon>
+                    </div>
+                </div>
+                <h2 class="profile-name" id="sidebarUserName"><?php echo htmlspecialchars($user['name']); ?></h2>
+                <p class="profile-email"><?php echo htmlspecialchars($user['email']); ?></p>
+                <div class="member-badge">
+                    <ion-icon name="shield-checkmark"></ion-icon>
+                    <span>Member Sejak <?php echo $join_date; ?></span>
                 </div>
             </div>
 
-            <div id="riwayat" class="content-tab">
-                <div class="content-card">
-                    <h2>Riwayat Pesanan</h2>
-                    <?php if (empty($orders)): ?>
-                        <p>Anda belum memiliki riwayat pesanan.</p>
-                    <?php else: ?>
-                        <table class="order-history-table">
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <div class="stat-val"><?php echo $total_orders; ?></div>
+                    <div class="stat-lbl">Total Pesanan</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-val money">Rp <?php echo number_format($total_spent, 0, ',', '.'); ?></div>
+                    <div class="stat-lbl">Total Belanja</div>
+                </div>
+            </div>
+
+            <nav class="account-nav">
+                <button type="button" class="nav-btn active" data-tab="profil">
+                    <ion-icon name="person-outline"></ion-icon>
+                    <span>Profil & Alamat</span>
+                </button>
+                <button type="button" class="nav-btn" data-tab="riwayat">
+                    <ion-icon name="receipt-outline"></ion-icon>
+                    <span>Riwayat Pesanan</span>
+                </button>
+                <a href="index.php#menu-section" class="nav-btn">
+                    <ion-icon name="cart-outline"></ion-icon>
+                    <span>Pesan Lagi</span>
+                </a>
+            </nav>
+        </aside>
+
+        <!-- Right Content Card -->
+        <main class="main-card">
+            <!-- Tab Profil -->
+            <div id="tab-profil" class="tab-pane active">
+                <div class="pane-header">
+                    <h1 class="pane-title">Pengaturan Profil</h1>
+                    <p class="pane-subtitle">Perbarui informasi kontak dan alamat pengiriman Anda</p>
+                </div>
+
+                <form id="profileForm">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label" for="name">Nama Lengkap</label>
+                            <div class="input-box">
+                                <input type="text" name="name" id="name" class="form-input" value="<?php echo htmlspecialchars($user['name']); ?>" required>
+                                <ion-icon name="person-outline"></ion-icon>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label" for="phone">Nomor WhatsApp / HP</label>
+                            <div class="input-box">
+                                <input type="tel" name="phone" id="phone" class="form-input" placeholder="08xxxxxxxxxx" value="<?php echo htmlspecialchars($user['phone'] ?? ''); ?>">
+                                <ion-icon name="call-outline"></ion-icon>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="email">Alamat Email (Akun)</label>
+                        <div class="input-box">
+                            <input type="email" id="email" class="form-input" value="<?php echo htmlspecialchars($user['email']); ?>" disabled>
+                            <ion-icon name="mail-outline"></ion-icon>
+                        </div>
+                        <small style="color: var(--text-muted); font-size: 0.78rem; margin-top: 4px; display: block;">Email digunakan sebagai identifikasi login dan tidak dapat diubah.</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label" for="address">Alamat Pengiriman Utama</label>
+                        <div class="input-box">
+                            <textarea name="address" id="address" class="form-input" rows="4" placeholder="Tuliskan alamat lengkap beserta patokan rumah untuk kurir..."><?php echo htmlspecialchars($user['address'] ?? ''); ?></textarea>
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn-save" id="saveProfileBtn">
+                            <ion-icon name="save-outline"></ion-icon>
+                            <span>Simpan Perubahan</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Tab Riwayat -->
+            <div id="tab-riwayat" class="tab-pane">
+                <div class="pane-header">
+                    <h1 class="pane-title">Riwayat Pesanan</h1>
+                    <p class="pane-subtitle">Daftar semua transaksi yang pernah Anda buat di Cimohot</p>
+                </div>
+
+                <?php if (empty($orders)): ?>
+                    <div class="empty-orders">
+                        <ion-icon name="receipt-outline"></ion-icon>
+                        <h3>Belum Ada Pesanan</h3>
+                        <p>Anda belum pernah melakukan pemesanan cireng montok di Cimohot.</p>
+                        <a href="index.php#menu-section" class="btn-save" style="text-decoration:none;">
+                            <span>Pilih Menu Sekarang</span>
+                            <ion-icon name="arrow-forward-outline"></ion-icon>
+                        </a>
+                    </div>
+                <?php else: ?>
+                    <div class="orders-table-wrapper">
+                        <table class="orders-table">
                             <thead>
                                 <tr>
-                                    <th>ID Pesanan</th>
-                                    <th>Tanggal</th>
-                                    <th>Total</th>
+                                    <th>ID Order</th>
+                                    <th>Waktu Pesan</th>
+                                    <th>Total Bayar</th>
                                     <th>Status</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <?php foreach ($orders as $order): ?>
+                                <?php foreach ($orders as $order): 
+                                    $status_raw = strtolower(trim($order['status']));
+                                    $status_class = 'status-pending';
+                                    if (strpos($status_raw, 'selesai') !== false) {
+                                        $status_class = 'status-selesai';
+                                    } elseif (strpos($status_raw, 'proses') !== false) {
+                                        $status_class = 'status-diproses';
+                                    } elseif (strpos($status_raw, 'batal') !== false) {
+                                        $status_class = 'status-dibatalkan';
+                                    }
+                                ?>
                                     <tr>
-                                        <td>#<?php echo $order['order_id']; ?></td>
-                                        <td><?php echo date('d M Y, H:i', strtotime($order['order_date'])); ?></td>
-                                        <td>Rp <?php echo number_format($order['total_amount'], 0, ',', '.'); ?></td>
                                         <td>
-                                            <span class="status status-<?php echo strtolower(str_replace(' ', '_', $order['status'])); ?>">
+                                            <span class="order-id-badge">#<?php echo htmlspecialchars($order['order_id']); ?></span>
+                                        </td>
+                                        <td>
+                                            <div style="font-weight: 500; color: #FFF;"><?php echo date('d M Y', strtotime($order['order_date'])); ?></div>
+                                            <small style="color: var(--text-muted); font-size: 0.78rem;"><?php echo date('H:i', strtotime($order['order_date'])); ?> WIB</small>
+                                        </td>
+                                        <td>
+                                            <span class="order-amount">Rp <?php echo number_format($order['total_amount'], 0, ',', '.'); ?></span>
+                                        </td>
+                                        <td>
+                                            <span class="order-status-badge <?php echo $status_class; ?>">
                                                 <?php echo htmlspecialchars($order['status']); ?>
                                             </span>
                                         </td>
@@ -363,77 +864,107 @@ $orders_stmt->close();
                                 <?php endforeach; ?>
                             </tbody>
                         </table>
-                    <?php endif; ?>
-                </div>
+                    </div>
+                <?php endif; ?>
             </div>
         </main>
     </div>
 
     <script>
-        document.addEventListener('DOMContentLoaded', function () {
-            const navLinks = document.querySelectorAll('.sidebar-nav .nav-link');
-            const contentTabs = document.querySelectorAll('.content-tab');
+        document.addEventListener('DOMContentLoaded', () => {
+            const navButtons = document.querySelectorAll('.account-nav .nav-btn[data-tab]');
+            const tabPanes = document.querySelectorAll('.tab-pane');
             const profileForm = document.getElementById('profileForm');
+            const saveBtn = document.getElementById('saveProfileBtn');
+            const sidebarUserName = document.getElementById('sidebarUserName');
+            const avatarLetter = document.getElementById('avatarLetter');
 
-            function switchTab(tabId) {
-                contentTabs.forEach(tab => tab.classList.remove('active'));
-                navLinks.forEach(link => link.classList.remove('active'));
+            // Tab switching logic
+            const switchTab = (tabName) => {
+                navButtons.forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.tab === tabName);
+                });
 
-                const targetTab = document.getElementById(tabId);
-                const targetLink = document.querySelector(`.nav-link[data-tab="${tabId}"]`);
+                tabPanes.forEach(pane => {
+                    pane.classList.toggle('active', pane.id === `tab-${tabName}`);
+                });
+            };
 
-                if (targetTab) targetTab.classList.add('active');
-                if (targetLink) targetLink.classList.add('active');
-            }
-
-            navLinks.forEach(link => {
-                const tabId = link.dataset.tab;
-                if (tabId) {
-                    link.addEventListener('click', function (e) {
-                        e.preventDefault();
-                        switchTab(tabId);
-                        window.location.hash = tabId;
-                    });
-                }
+            navButtons.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const tabName = btn.dataset.tab;
+                    switchTab(tabName);
+                    history.replaceState(null, '', `#${tabName}`);
+                });
             });
 
-            const currentHash = window.location.hash.substring(1);
-            if (currentHash === 'riwayat') {
+            // Read hash on page load
+            const hash = window.location.hash.replace('#', '');
+            if (hash === 'riwayat') {
                 switchTab('riwayat');
-            } else {
-                switchTab('profil');
             }
 
-            profileForm.addEventListener('submit', function (e) {
+            // AJAX Save Profile
+            profileForm.addEventListener('submit', async (e) => {
                 e.preventDefault();
-                const saveBtn = document.getElementById('saveProfileBtn');
-                saveBtn.disabled = true;
-                saveBtn.textContent = 'Menyimpan...';
 
-                const formData = new FormData(this);
+                const originalBtnContent = saveBtn.innerHTML;
+                saveBtn.disabled = true;
+                saveBtn.innerHTML = `
+                    <span style="display:inline-block; animation: spin 1s linear infinite; margin-right: 6px;">⏳</span>
+                    <span>Menyimpan...</span>
+                `;
+
+                const formData = new FormData(profileForm);
                 formData.append('action', 'update_user_profile');
 
-                fetch(API_URL, {
-                    method: 'POST',
-                    body: new URLSearchParams(formData),
-                    credentials: 'include'
-                })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success) {
-                            Swal.fire('Berhasil!', data.message, 'success');
-                            document.getElementById('sidebarName').textContent = document.getElementById('name').value;
-                        } else {
-                            Swal.fire('Gagal!', data.message, 'error');
-                        }
-                    })
-                    .catch(error => {
-                        Swal.fire('Error!', 'Terjadi kesalahan sistem.', 'error');
-                    })
-                    .finally(() => {
-                        saveBtn.disabled = false;
-                        saveBtn.textContent = 'Simpan Perubahan';
+                try {
+                    const response = await fetch('api.php', {
+                        method: 'POST',
+                        body: formData
                     });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'Profil Diperbarui!',
+                            text: data.message || 'Perubahan data berhasil disimpan.',
+                            background: '#141418',
+                            color: '#FAFAFA',
+                            iconColor: '#22C55E',
+                            confirmButtonColor: '#FF3D2E'
+                        });
+
+                        const newName = document.getElementById('name').value.trim();
+                        sidebarUserName.textContent = newName;
+                        if (newName.length > 0) {
+                            avatarLetter.textContent = newName.charAt(0).toUpperCase();
+                        }
+                    } else {
+                        Swal.fire({
+                            icon: 'error',
+                            title: 'Gagal Menyimpan',
+                            text: data.message || 'Terjadi kesalahan saat menyimpan profil.',
+                            background: '#141418',
+                            color: '#FAFAFA',
+                            confirmButtonColor: '#FF3D2E'
+                        });
+                    }
+                } catch (err) {
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Gangguan Sistem',
+                        text: 'Gagal menghubungi server.',
+                        background: '#141418',
+                        color: '#FAFAFA',
+                        confirmButtonColor: '#FF3D2E'
+                    });
+                } finally {
+                    saveBtn.disabled = false;
+                    saveBtn.innerHTML = originalBtnContent;
+                }
             });
         });
     </script>
