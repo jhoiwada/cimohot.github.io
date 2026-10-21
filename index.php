@@ -6,21 +6,24 @@
   <meta http-equiv="X-UA-Compatible" content="IE=edge" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Cimohot | Cireng Isi Montok Hot • No.1 Jajan Pedas Jakarta</title>
-  <meta name="description" content="Dari dapur Marilyn sejak 2021, cireng isi montok krispi dengan daging berlimpah, cabai rawit segar, dan 6 level kepedasan. Lebih dari 15.000 porsi terjual. Order sekarang!" />
-  <link rel="canonical" href="https://cimohot.test/" />
+  <meta name="description" content="Dari dapur Marilyn sejak 2021, cireng isi montok krispi dengan daging berlimpah, cabai rawit segar, dan 6 level kepedasan. Lebih dari 15.000 porsi terjual. Order online sekarang!" />
+  <meta name="keywords" content="cireng isi pedas, cireng montok, cireng ayam pedas, cimohot, cireng koja jakarta utara, jajanan pedas jakarta, kuliner pedas jakarta, cireng mercon, order cireng online" />
+  <meta name="author" content="Cimohot" />
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+  <link rel="canonical" href="https://cimohot.web.id/" />
 
   <!-- Open Graph (Social Sharing) -->
   <meta property="og:type" content="restaurant" />
   <meta property="og:title" content="Cimohot | Cireng Isi Montok Hot • No.1 Jajan Pedas Jakarta" />
   <meta property="og:description" content="Dari dapur Marilyn sejak 2021, cireng isi montok krispi dengan daging berlimpah & cabai rawit segar. 15.000+ porsi terjual, 4.9★ rating." />
-  <meta property="og:image" content="https://cimohot.test/assets/images/menu/cireng-ayam-pedas.jpg" />
-  <meta property="og:url" content="https://cimohot.test/" />
+  <meta property="og:image" content="https://cimohot.web.id/assets/images/menu/cireng-ayam-pedas.jpg" />
+  <meta property="og:url" content="https://cimohot.web.id/" />
   <meta property="og:site_name" content="Cimohot" />
   <meta property="og:locale" content="id_ID" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Cimohot | Cireng Montok Pedas No.1 Jakarta" />
   <meta name="twitter:description" content="Cireng isi montok krispi: Pedas, gurih, dan nagih sejak 2021." />
-  <meta name="twitter:image" content="https://cimohot.test/assets/images/menu/cireng-ayam-pedas.jpg" />
+  <meta name="twitter:image" content="https://cimohot.web.id/assets/images/menu/cireng-ayam-pedas.jpg" />
 
   <!-- JSON-LD Structured Data -->
   <script type="application/ld+json">
@@ -29,9 +32,9 @@
     "@type": "FoodEstablishment",
     "name": "Cimohot • Cireng Isi Montok Hot",
     "description": "Pelopor cireng isi montok krispi premium. Tersedia 6 level kepedasan, aneka isian daging, keju, dan bakso. Buka setiap hari.",
-    "url": "https://cimohot.test",
+    "url": "https://cimohot.web.id",
     "telephone": "+6285930194086",
-    "image": "https://cimohot.test/assets/images/menu/cireng-ayam-pedas.jpg",
+    "image": "https://cimohot.web.id/assets/images/menu/cireng-ayam-pedas.jpg",
     "address": {
       "@type": "PostalAddress",
       "streetAddress": "Jl. Muncang Raya No. 55",
